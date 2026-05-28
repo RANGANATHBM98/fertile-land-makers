@@ -12,6 +12,7 @@ const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: '--font-space'
 })
+// this is the code for chahges 
 
 export const metadata: Metadata = {
   title: 'FertileLandMakers - Transform Unused Land Into Farming Opportunities',
