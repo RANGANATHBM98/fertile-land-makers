@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,51 +10,21 @@ import {
   MapPin, 
   Droplets, 
   Leaf, 
-  ArrowRight,
-  Star
+  ArrowRight
 } from "lucide-react"
+import { apiRequest, mediaUrl } from "@/lib/api"
 
-const featuredLands = [
-  {
-    id: 1,
-    title: "Premium Farmland in Karnataka",
-    location: "Hassan, Karnataka",
-    size: "25 Acres",
-    price: "₹15,000/month",
-    waterLevel: "High",
-    soilType: "Black Soil",
-    crops: ["Rice", "Sugarcane", "Cotton"],
-    image: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=2070&auto=format&fit=crop",
-    rating: 4.8,
-    verified: true,
-  },
-  {
-    id: 2,
-    title: "Fertile Plains in Punjab",
-    location: "Ludhiana, Punjab",
-    size: "40 Acres",
-    price: "₹25,000/month",
-    waterLevel: "Medium",
-    soilType: "Alluvial Soil",
-    crops: ["Wheat", "Rice", "Maize"],
-    image: "https://images.unsplash.com/photo-1574943320219-553eb213f72d?q=80&w=2070&auto=format&fit=crop",
-    rating: 4.9,
-    verified: true,
-  },
-  {
-    id: 3,
-    title: "Orchard Land in Maharashtra",
-    location: "Nashik, Maharashtra",
-    size: "15 Acres",
-    price: "₹12,000/month",
-    waterLevel: "High",
-    soilType: "Red Soil",
-    crops: ["Grapes", "Pomegranate", "Onion"],
-    image: "https://images.unsplash.com/photo-1464226184884-fa280b87c399?q=80&w=2070&auto=format&fit=crop",
-    rating: 4.7,
-    verified: true,
-  },
-]
+type FeaturedLand = {
+  id: string
+  title: string
+  location: string
+  size: string
+  price: string
+  waterLevel: string
+  soilType: string
+  crops: string[]
+  image: string
+}
 
 const container = {
   hidden: { opacity: 0 },
@@ -71,6 +42,36 @@ const item = {
 }
 
 export function FeaturedLands() {
+  const [featuredLands, setFeaturedLands] = useState<FeaturedLand[]>([])
+
+  useEffect(() => {
+    apiRequest<{ items: Array<{
+      id: string
+      title: string
+      district: string
+      state: string
+      sizeAcres: number
+      monthlyRentInr: number
+      waterLevel: string
+      waterSources: string[]
+      soilType: string
+      crops: string[]
+      images: string[]
+    }> }>("/lands?limit=3")
+      .then(({ items }) => setFeaturedLands(items.map(land => ({
+        id: land.id,
+        title: land.title,
+        location: `${land.district}, ${land.state}`,
+        size: `${land.sizeAcres} Acres`,
+        price: `₹${land.monthlyRentInr.toLocaleString("en-IN")}/month`,
+        waterLevel: land.waterLevel || land.waterSources.join(", "),
+        soilType: land.soilType,
+        crops: land.crops,
+        image: mediaUrl(land.images[0]),
+      }))))
+      .catch(() => setFeaturedLands([]))
+  }, [])
+
   return (
     <section className="py-24 relative">
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-primary/5 to-transparent pointer-events-none" />
@@ -116,17 +117,7 @@ export function FeaturedLands() {
                   
                   {/* Badges */}
                   <div className="absolute top-4 left-4 flex gap-2">
-                    {land.verified && (
-                      <Badge className="bg-primary text-primary-foreground">
-                        Verified
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  {/* Rating */}
-                  <div className="absolute top-4 right-4 flex items-center gap-1 px-2 py-1 rounded-full glass">
-                    <Star className="h-4 w-4 text-yellow-400 fill-yellow-400" />
-                    <span className="text-sm font-medium text-foreground">{land.rating}</span>
+                    <Badge className="bg-primary text-primary-foreground">Verified listing</Badge>
                   </div>
                   
                   {/* Price */}

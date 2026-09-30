@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
@@ -31,6 +31,46 @@ import {
   ArrowDownRight
 } from "lucide-react"
 import Link from "next/link"
+import { apiRequest, mediaUrl } from "@/lib/api"
+import { openRazorpayCheckout, RazorpayOrder } from "@/lib/razorpay"
+
+type OwnerLand = {
+  id: string
+  title: string
+  location: string
+  size: string
+  acres: number
+  price: string
+  status: string
+  image: string
+  ownerListingFeePaid: boolean
+  ownershipProofApproved: boolean
+  feePerAcre: number
+}
+
+type ApiLand = {
+  id: string
+  title: string
+  district: string
+  state: string
+  sizeAcres: number
+  annualRentInr: number
+  ownerListingFeePaid: boolean | null
+  ownerListingFeePerAcreInr: number | null
+  status: string
+  images: string[]
+}
+
+type ContactUnlock = {
+  id: string
+  farmerName: string
+  farmerId: string
+  farmerEmail: string
+  farmerPhone: string
+  landId: string
+  landTitle: string
+  unlockedAt: string
+}
 
 const ownerLands = [
   {
@@ -121,7 +161,62 @@ const getStatusIcon = (status: string) => {
 }
 
 export default function OwnerDashboard() {
-  const [activeTab, setActiveTab] = useState("overview")
+  const [ownerLands, setOwnerLands] = useState<OwnerLand[]>([])
+  const [contactUnlocks, setContactUnlocks] = useState<ContactUnlock[]>([])
+  const [dashboardError, setDashboardError] = useState("")
+  const [feeBusyLandId, setFeeBusyLandId] = useState("")
+
+  useEffect(() => {
+    Promise.all([
+      apiRequest<ApiLand[]>("/users/me/lands"),
+      apiRequest<ContactUnlock[]>("/users/me/contact-unlocks"),
+      apiRequest<{ id: string; kind: string; landId: string | null; status: string }[]>("/users/me/documents"),
+    ]).then(([lands, unlocks, documents]) => {
+      setOwnerLands(lands.map(land => ({
+        id: land.id,
+        title: land.title,
+        location: `${land.district}, ${land.state}`,
+        size: `${land.sizeAcres} Acres`,
+        acres: land.sizeAcres,
+        price: `₹${land.annualRentInr.toLocaleString("en-IN")}/year`,
+        status: land.status === "approved" ? "active" : land.status,
+        image: mediaUrl(land.images[0]),
+        ownerListingFeePaid: land.ownerListingFeePaid === true,
+        feePerAcre: land.ownerListingFeePerAcreInr ?? 50,
+        ownershipProofApproved: documents.some(document =>
+          document.landId === land.id && document.kind === "land_ownership" && document.status === "approved"
+        ),
+      })))
+      setContactUnlocks(unlocks)
+    }).catch(cause => setDashboardError(cause instanceof Error ? cause.message : "Unable to load owner dashboard"))
+  }, [])
+
+  const approvedLands = ownerLands.filter(land => land.status === "active")
+  const annualRentTotal = approvedLands.reduce((total, land) => total + Number(land.price.replace(/[^\d]/g, "")), 0)
+
+  const payListingFee = async (land: OwnerLand) => {
+    setDashboardError("")
+    setFeeBusyLandId(land.id)
+    try {
+      const order = await apiRequest<RazorpayOrder>(`/lands/${land.id}/listing-fee-order`, { method: "POST" })
+      if (order.alreadyPaid) {
+        window.location.reload()
+        return
+      }
+      await openRazorpayCheckout(order, "Land listing fee", async payment => {
+        try {
+          await apiRequest("/payments/verify", { method: "POST", body: JSON.stringify(payment) })
+          window.location.reload()
+        } catch (cause) {
+          setDashboardError(cause instanceof Error ? cause.message : "Unable to verify the listing-fee payment")
+          setFeeBusyLandId("")
+        }
+      }, () => setFeeBusyLandId(""))
+    } catch (cause) {
+      setDashboardError(cause instanceof Error ? cause.message : "Unable to start listing-fee payment")
+      setFeeBusyLandId("")
+    }
+  }
 
   return (
     <main className="min-h-screen bg-background">
@@ -139,7 +234,7 @@ export default function OwnerDashboard() {
               <h1 className="text-3xl md:text-4xl font-bold mb-2">
                 <span className="text-gradient">Land Owner</span> Dashboard
               </h1>
-              <p className="text-muted-foreground">Manage your lands and lease requests</p>
+              <p className="text-muted-foreground">Manage your land listings and contact inquiries</p>
             </div>
             <Link href="/upload">
               <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -161,7 +256,7 @@ export default function OwnerDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground mb-1">Total Lands</p>
-                    <p className="text-3xl font-bold text-foreground">3</p>
+                    <p className="text-3xl font-bold text-foreground">{ownerLands.length}</p>
                   </div>
                   <div className="p-3 rounded-xl bg-primary/10">
                     <MapPin className="h-6 w-6 text-primary" />
@@ -169,8 +264,7 @@ export default function OwnerDashboard() {
                 </div>
                 <div className="flex items-center gap-1 mt-4 text-sm">
                   <ArrowUpRight className="h-4 w-4 text-green-400" />
-                  <span className="text-green-400">+1</span>
-                  <span className="text-muted-foreground">this month</span>
+                  <span className="text-muted-foreground">Across all listing statuses</span>
                 </div>
               </CardContent>
             </Card>
@@ -179,17 +273,15 @@ export default function OwnerDashboard() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Total Views</p>
-                    <p className="text-3xl font-bold text-foreground">901</p>
+                    <p className="text-sm text-muted-foreground mb-1">Contact Unlocks</p>
+                    <p className="text-3xl font-bold text-foreground">{contactUnlocks.length}</p>
                   </div>
                   <div className="p-3 rounded-xl bg-blue-400/10">
                     <Eye className="h-6 w-6 text-blue-400" />
                   </div>
                 </div>
                 <div className="flex items-center gap-1 mt-4 text-sm">
-                  <ArrowUpRight className="h-4 w-4 text-green-400" />
-                  <span className="text-green-400">+23%</span>
-                  <span className="text-muted-foreground">vs last month</span>
+                  <span className="text-muted-foreground">Farmers who unlocked contact</span>
                 </div>
               </CardContent>
             </Card>
@@ -198,15 +290,15 @@ export default function OwnerDashboard() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Active Leases</p>
-                    <p className="text-3xl font-bold text-foreground">1</p>
+                    <p className="text-sm text-muted-foreground mb-1">Approved Listings</p>
+                    <p className="text-3xl font-bold text-foreground">{approvedLands.length}</p>
                   </div>
                   <div className="p-3 rounded-xl bg-green-400/10">
                     <Users className="h-6 w-6 text-green-400" />
                   </div>
                 </div>
                 <div className="flex items-center gap-1 mt-4 text-sm">
-                  <span className="text-muted-foreground">50 Acres leased</span>
+                  <span className="text-muted-foreground">Visible to farmers</span>
                 </div>
               </CardContent>
             </Card>
@@ -215,17 +307,15 @@ export default function OwnerDashboard() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Monthly Earnings</p>
-                    <p className="text-3xl font-bold text-foreground">₹35K</p>
+                    <p className="text-sm text-muted-foreground mb-1">Approved Annual Asking Rent</p>
+                    <p className="text-3xl font-bold text-foreground">₹{annualRentTotal.toLocaleString("en-IN")}</p>
                   </div>
                   <div className="p-3 rounded-xl bg-yellow-400/10">
                     <DollarSign className="h-6 w-6 text-yellow-400" />
                   </div>
                 </div>
                 <div className="flex items-center gap-1 mt-4 text-sm">
-                  <ArrowUpRight className="h-4 w-4 text-green-400" />
-                  <span className="text-green-400">+15%</span>
-                  <span className="text-muted-foreground">vs last month</span>
+                  <span className="text-muted-foreground">Asking rent, not earned income</span>
                 </div>
               </CardContent>
             </Card>
@@ -243,15 +333,18 @@ export default function OwnerDashboard() {
                   My Lands
                 </TabsTrigger>
                 <TabsTrigger value="requests" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  Lease Requests
+                  Contact Unlocks
                 </TabsTrigger>
                 <TabsTrigger value="analytics" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
                   Analytics
                 </TabsTrigger>
               </TabsList>
 
+              {dashboardError && <p role="alert" className="mb-4 text-sm text-red-500">{dashboardError}</p>}
+
               {/* My Lands Tab */}
               <TabsContent value="lands" className="space-y-4">
+                {ownerLands.length === 0 && !dashboardError && <p className="py-10 text-center text-muted-foreground">No land listings yet.</p>}
                 {ownerLands.map((land, index) => (
                   <motion.div
                     key={land.id}
@@ -262,8 +355,8 @@ export default function OwnerDashboard() {
                     <Card className="glass-card hover:border-primary/30 transition-all">
                       <CardContent className="p-4">
                         <div className="flex flex-col md:flex-row gap-4">
-                          <div className="w-full md:w-48 h-32 rounded-lg overflow-hidden">
-                            <img src={land.image} alt={land.title} className="w-full h-full object-cover" />
+                          <div className="w-full md:w-48 h-32 rounded-lg overflow-hidden bg-secondary">
+                            {land.image && <img src={land.image} alt={land.title} className="w-full h-full object-cover" />}
                           </div>
                           <div className="flex-grow">
                             <div className="flex items-start justify-between">
@@ -290,26 +383,24 @@ export default function OwnerDashboard() {
                                 <p className="font-medium text-primary">{land.price}</p>
                               </div>
                               <div>
-                                <p className="text-sm text-muted-foreground">Views</p>
-                                <p className="font-medium text-foreground">{land.views}</p>
-                              </div>
-                              <div>
-                                <p className="text-sm text-muted-foreground">Inquiries</p>
-                                <p className="font-medium text-foreground">{land.inquiries}</p>
+                                <p className="text-sm text-muted-foreground">Contact unlocks</p>
+                                <p className="font-medium text-foreground">{contactUnlocks.filter(unlock => unlock.landId === land.id).length}</p>
                               </div>
                             </div>
 
                             <div className="flex gap-2 mt-4">
-                              <Button variant="outline" size="sm" className="neon-border hover:bg-primary/10">
-                                <Edit className="h-4 w-4 mr-1" />
-                                Edit
-                              </Button>
                               <Link href={`/land/${land.id}`}>
                                 <Button variant="ghost" size="sm">
                                   <Eye className="h-4 w-4 mr-1" />
                                   View
                                 </Button>
                               </Link>
+                              {!land.ownerListingFeePaid && <div className="flex flex-col gap-2">
+                                <p className="text-xs text-muted-foreground">₹{land.feePerAcre.toLocaleString("en-IN")} per acre, due after ownership proof approval</p>
+                                <Button size="sm" onClick={() => payListingFee(land)} disabled={!land.ownershipProofApproved || feeBusyLandId === land.id}>
+                                  {feeBusyLandId === land.id ? "Opening checkout..." : land.ownershipProofApproved ? "Pay listing fee" : "Awaiting proof review"}
+                                </Button>
+                              </div>}
                             </div>
                           </div>
                         </div>
@@ -319,9 +410,10 @@ export default function OwnerDashboard() {
                 ))}
               </TabsContent>
 
-              {/* Lease Requests Tab */}
+              {/* Contact Unlocks Tab */}
               <TabsContent value="requests" className="space-y-4">
-                {leaseRequests.map((request, index) => (
+                {contactUnlocks.length === 0 && <p className="py-10 text-center text-muted-foreground">No farmers have unlocked contact details yet.</p>}
+                {contactUnlocks.map((request, index) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -334,41 +426,27 @@ export default function OwnerDashboard() {
                           <div className="flex items-center gap-4">
                             <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
                               <span className="text-xl font-bold text-primary">
-                                {request.farmer.charAt(0)}
+                                {request.farmerName.charAt(0)}
                               </span>
                             </div>
                             <div>
-                              <h3 className="font-semibold text-foreground">{request.farmer}</h3>
-                              <p className="text-sm text-muted-foreground">for {request.land}</p>
+                              <h3 className="font-semibold text-foreground">{request.farmerName}</h3>
+                              <p className="text-sm text-muted-foreground">for {request.landTitle}</p>
                             </div>
                           </div>
-                          <Badge className={`capitalize ${getStatusColor(request.status)}`}>
-                            {getStatusIcon(request.status)}
-                            <span className="ml-1">{request.status}</span>
-                          </Badge>
+                          <Badge className="bg-green-400/10 text-green-400">Contact unlocked</Badge>
                         </div>
                         
-                        <p className="mt-4 text-muted-foreground p-4 rounded-lg bg-secondary">
-                          {request.message}
-                        </p>
+                        <p className="mt-4 rounded-lg bg-secondary p-4 text-muted-foreground">{request.farmerEmail} · {request.farmerPhone}</p>
                         
                         <div className="flex items-center justify-between mt-4">
                           <p className="text-sm text-muted-foreground">
                             <Calendar className="h-4 w-4 inline mr-1" />
-                            {request.date}
+                            {new Date(request.unlockedAt).toLocaleDateString()}
                           </p>
-                          {request.status === "pending" && (
-                            <div className="flex gap-2">
-                              <Button size="sm" className="bg-primary text-primary-foreground">
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Approve
-                              </Button>
-                              <Button size="sm" variant="outline" className="text-red-400 border-red-400/30 hover:bg-red-400/10">
-                                <XCircle className="h-4 w-4 mr-1" />
-                                Reject
-                              </Button>
-                            </div>
-                          )}
+                          <Link href={`/messages?landId=${request.landId}&userId=${request.farmerId}`}>
+                            <Button size="sm" variant="outline">Message farmer</Button>
+                          </Link>
                         </div>
                       </CardContent>
                     </Card>

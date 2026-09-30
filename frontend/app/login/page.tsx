@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { FormEvent, useState } from "react"
 import { motion } from "framer-motion"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
@@ -21,9 +21,67 @@ import {
   Chrome
 } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { apiRequest, storeAccessToken } from "@/lib/api"
 
 export default function LoginPage() {
+  const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
+  const [activeRole, setActiveRole] = useState<"farmer" | "owner">("farmer")
+  const [loginEmail, setLoginEmail] = useState("")
+  const [loginPassword, setLoginPassword] = useState("")
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
+  const [registerEmail, setRegisterEmail] = useState("")
+  const [phone, setPhone] = useState("")
+  const [registerPassword, setRegisterPassword] = useState("")
+  const [error, setError] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+
+  const finishAuthentication = (result: { accessToken: string; user: { role: string } }) => {
+    storeAccessToken(result.accessToken)
+    router.push(result.user.role === "owner" ? "/dashboard/owner" : "/dashboard/farmer")
+  }
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError("")
+    setSubmitting(true)
+    try {
+      const result = await apiRequest<{ accessToken: string; user: { role: string } }>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      })
+      finishAuthentication(result)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to sign in")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError("")
+    setSubmitting(true)
+    try {
+      const result = await apiRequest<{ accessToken: string; user: { role: string } }>("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({
+          full_name: `${firstName} ${lastName}`.trim(),
+          email: registerEmail,
+          phone,
+          password: registerPassword,
+          role: activeRole,
+        }),
+      })
+      finishAuthentication(result)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to create account")
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <main className="min-h-screen bg-background">
@@ -51,6 +109,7 @@ export default function LoginPage() {
           >
             <Card className="glass-card neon-border">
               <CardContent className="p-8">
+                {error && <p role="alert" className="mb-4 text-sm text-red-500">{error}</p>}
                 <Tabs defaultValue="login" className="space-y-6">
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="login">Sign In</TabsTrigger>
@@ -59,6 +118,7 @@ export default function LoginPage() {
 
                   {/* Login Tab */}
                   <TabsContent value="login" className="space-y-6">
+                    <form onSubmit={handleLogin} className="space-y-6">
                     <div>
                       <Label htmlFor="email">Email Address</Label>
                       <div className="relative mt-2">
@@ -67,6 +127,9 @@ export default function LoginPage() {
                           id="email"
                           type="email"
                           placeholder="you@example.com"
+                          required
+                          value={loginEmail}
+                          onChange={(event) => setLoginEmail(event.target.value)}
                           className="h-12 pl-12 bg-secondary border-border"
                         />
                       </div>
@@ -85,6 +148,9 @@ export default function LoginPage() {
                           id="password"
                           type={showPassword ? "text" : "password"}
                           placeholder="Enter your password"
+                          required
+                          value={loginPassword}
+                          onChange={(event) => setLoginPassword(event.target.value)}
                           className="h-12 pl-12 pr-12 bg-secondary border-border"
                         />
                         <button
@@ -97,10 +163,11 @@ export default function LoginPage() {
                       </div>
                     </div>
 
-                    <Button className="w-full h-12 bg-primary text-primary-foreground">
-                      Sign In
+                    <Button type="submit" disabled={submitting} className="w-full h-12 bg-primary text-primary-foreground">
+                      {submitting ? "Signing in..." : "Sign In"}
                       <ArrowRight className="h-5 w-5 ml-2" />
                     </Button>
+                    </form>
 
                     <div className="relative">
                       <div className="absolute inset-0 flex items-center">
@@ -111,7 +178,7 @@ export default function LoginPage() {
                       </div>
                     </div>
 
-                    <Button variant="outline" className="w-full h-12 neon-border">
+                    <Button type="button" variant="outline" disabled title="Google sign-in is not configured" className="w-full h-12 neon-border">
                       <Chrome className="h-5 w-5 mr-2" />
                       Continue with Google
                     </Button>
@@ -119,6 +186,7 @@ export default function LoginPage() {
 
                   {/* Register Tab */}
                   <TabsContent value="register" className="space-y-6">
+                    <form onSubmit={handleRegister} className="space-y-6">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="firstName">First Name</Label>
@@ -127,6 +195,9 @@ export default function LoginPage() {
                           <Input
                             id="firstName"
                             placeholder="John"
+                            required
+                            value={firstName}
+                            onChange={(event) => setFirstName(event.target.value)}
                             className="h-12 pl-12 bg-secondary border-border"
                           />
                         </div>
@@ -136,6 +207,9 @@ export default function LoginPage() {
                         <Input
                           id="lastName"
                           placeholder="Doe"
+                            required
+                            value={lastName}
+                            onChange={(event) => setLastName(event.target.value)}
                           className="h-12 mt-2 bg-secondary border-border"
                         />
                       </div>
@@ -149,6 +223,9 @@ export default function LoginPage() {
                           id="registerEmail"
                           type="email"
                           placeholder="you@example.com"
+                          required
+                          value={registerEmail}
+                          onChange={(event) => setRegisterEmail(event.target.value)}
                           className="h-12 pl-12 bg-secondary border-border"
                         />
                       </div>
@@ -162,6 +239,9 @@ export default function LoginPage() {
                           id="phone"
                           type="tel"
                           placeholder="+91 98765 43210"
+                          required
+                          value={phone}
+                          onChange={(event) => setPhone(event.target.value)}
                           className="h-12 pl-12 bg-secondary border-border"
                         />
                       </div>
@@ -175,6 +255,10 @@ export default function LoginPage() {
                           id="registerPassword"
                           type={showPassword ? "text" : "password"}
                           placeholder="Create a strong password"
+                            minLength={10}
+                            required
+                            value={registerPassword}
+                            onChange={(event) => setRegisterPassword(event.target.value)}
                           className="h-12 pl-12 pr-12 bg-secondary border-border"
                         />
                         <button
@@ -190,21 +274,22 @@ export default function LoginPage() {
                     <div>
                       <Label>I am a</Label>
                       <div className="grid grid-cols-2 gap-4 mt-2">
-                        <Button variant="outline" className="h-12 neon-border hover:bg-primary/10">
+                        <Button type="button" variant={activeRole === "farmer" ? "default" : "outline"} onClick={() => setActiveRole("farmer")} className="h-12 neon-border hover:bg-primary/10">
                           <Leaf className="h-5 w-5 mr-2" />
                           Farmer
                         </Button>
-                        <Button variant="outline" className="h-12 neon-border hover:bg-primary/10">
+                        <Button type="button" variant={activeRole === "owner" ? "default" : "outline"} onClick={() => setActiveRole("owner")} className="h-12 neon-border hover:bg-primary/10">
                           <User className="h-5 w-5 mr-2" />
                           Land Owner
                         </Button>
                       </div>
                     </div>
 
-                    <Button className="w-full h-12 bg-primary text-primary-foreground">
-                      Create Account
+                    <Button type="submit" disabled={submitting} className="w-full h-12 bg-primary text-primary-foreground">
+                      {submitting ? "Creating account..." : "Create Account"}
                       <ArrowRight className="h-5 w-5 ml-2" />
                     </Button>
+                    </form>
                   </TabsContent>
                 </Tabs>
               </CardContent>

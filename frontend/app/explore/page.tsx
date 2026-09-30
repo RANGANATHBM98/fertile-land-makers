@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
@@ -31,6 +31,7 @@ import {
   X,
   SlidersHorizontal
 } from "lucide-react"
+import { apiRequest, mediaUrl } from "@/lib/api"
 
 const lands = [
   {
@@ -130,7 +131,40 @@ const soilTypes = ["All Soils", "Black Soil", "Alluvial Soil", "Red Soil", "Late
 const waterLevels = ["All Levels", "Very High", "High", "Medium", "Low"]
 const cropTypes = ["All Crops", "Rice", "Wheat", "Cotton", "Sugarcane", "Tea", "Grapes", "Banana"]
 
+type LandCard = {
+  id: string
+  title: string
+  location: string
+  size: string
+  acres: number
+  price: number
+  waterLevel: string
+  soilType: string
+  crops: string[]
+  image: string
+  verified: boolean
+  state: string
+  district: string
+}
+
+type ApiLand = {
+  id: string
+  title: string
+  state: string
+  district: string
+  sizeAcres: number
+  annualRentInr: number
+  waterLevel: string
+  waterSources: string[]
+  soilType: string
+  crops: string[]
+  images: string[]
+}
+
 export default function ExplorePage() {
+  const [lands, setLands] = useState<LandCard[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState("")
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [showFilters, setShowFilters] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
@@ -138,19 +172,39 @@ export default function ExplorePage() {
   const [selectedSoil, setSelectedSoil] = useState("All Soils")
   const [selectedWater, setSelectedWater] = useState("All Levels")
   const [selectedCrop, setSelectedCrop] = useState("All Crops")
-  const [priceRange, setPriceRange] = useState([0, 50000])
+  const [priceRange, setPriceRange] = useState([0, 5000000])
   const [acreRange, setAcreRange] = useState([0, 100])
+
+  useEffect(() => {
+    apiRequest<{ items: ApiLand[] }>("/lands?limit=100")
+      .then(({ items }) => setLands(items.map(land => ({
+        id: land.id,
+        title: land.title,
+        location: `${land.district}, ${land.state}`,
+        size: `${land.sizeAcres} Acres`,
+        acres: land.sizeAcres,
+        price: land.annualRentInr,
+        waterLevel: land.waterLevel || (land.waterSources.length ? "Available" : "Not listed"),
+        soilType: land.soilType,
+        crops: land.crops,
+        image: mediaUrl(land.images[0]),
+        verified: true,
+        state: land.state,
+        district: land.district,
+      }))))
+      .catch(cause => setLoadError(cause instanceof Error ? cause.message : "Unable to load land listings"))
+      .finally(() => setIsLoading(false))
+  }, [])
 
   const filteredLands = lands.filter((land) => {
     const matchesSearch = land.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       land.location.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesState = selectedState === "All States" || land.state === selectedState
     const matchesSoil = selectedSoil === "All Soils" || land.soilType === selectedSoil
-    const matchesWater = selectedWater === "All Levels" || land.waterLevel === selectedWater
+    const matchesWater = selectedWater === "All Levels" || land.waterLevel.toLowerCase() === selectedWater.toLowerCase()
     const matchesCrop = selectedCrop === "All Crops" || land.crops.includes(selectedCrop)
     const matchesPrice = land.price >= priceRange[0] && land.price <= priceRange[1]
-    const acres = parseInt(land.size)
-    const matchesAcres = acres >= acreRange[0] && acres <= acreRange[1]
+    const matchesAcres = land.acres >= acreRange[0] && land.acres <= acreRange[1]
     
     return matchesSearch && matchesState && matchesSoil && matchesWater && matchesCrop && matchesPrice && matchesAcres
   })
@@ -161,7 +215,7 @@ export default function ExplorePage() {
     setSelectedSoil("All Soils")
     setSelectedWater("All Levels")
     setSelectedCrop("All Crops")
-    setPriceRange([0, 50000])
+    setPriceRange([0, 5000000])
     setAcreRange([0, 100])
   }
 
@@ -315,14 +369,14 @@ export default function ExplorePage() {
                       {/* Price Range */}
                       <div>
                         <Label className="text-sm font-medium mb-4 block">
-                          Price Range: ₹{priceRange[0].toLocaleString()} - ₹{priceRange[1].toLocaleString()}/month
+                          Annual Rent: ₹{priceRange[0].toLocaleString("en-IN")} - ₹{priceRange[1].toLocaleString("en-IN")}/year
                         </Label>
                         <Slider
                           value={priceRange}
                           onValueChange={setPriceRange}
                           min={0}
-                          max={50000}
-                          step={1000}
+                          max={5000000}
+                          step={50000}
                           className="py-2"
                         />
                       </div>
@@ -355,6 +409,8 @@ export default function ExplorePage() {
                   Showing <span className="text-primary font-semibold">{filteredLands.length}</span> lands
                 </p>
               </div>
+              {isLoading && <p className="mb-6 text-sm text-muted-foreground">Loading approved listings...</p>}
+              {loadError && <p role="alert" className="mb-6 text-sm text-red-500">{loadError}</p>}
 
               {/* Land Cards */}
               <div className={`grid gap-6 ${viewMode === "grid" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
@@ -379,20 +435,14 @@ export default function ExplorePage() {
                         <div className="absolute top-4 left-4 flex gap-2">
                           {land.verified && (
                             <Badge className="bg-primary text-primary-foreground">
-                              Verified
+                              Verified listing
                             </Badge>
                           )}
                         </div>
                         
-                        {/* Rating */}
-                        <div className="absolute top-4 right-4 flex items-center gap-1 px-2 py-1 rounded-full glass">
-                          <Star className="h-4 w-4 text-yellow-400 fill-yellow-400" />
-                          <span className="text-sm font-medium text-foreground">{land.rating}</span>
-                        </div>
-                        
                         {/* Price */}
                         <div className="absolute bottom-4 right-4">
-                          <div className="text-xl font-bold text-primary">₹{land.price.toLocaleString()}/mo</div>
+                          <div className="text-xl font-bold text-primary">₹{land.price.toLocaleString("en-IN")}/year</div>
                         </div>
                       </div>
 
@@ -449,7 +499,7 @@ export default function ExplorePage() {
                 ))}
               </div>
 
-              {filteredLands.length === 0 && (
+              {!isLoading && !loadError && filteredLands.length === 0 && (
                 <div className="text-center py-16">
                   <div className="text-6xl mb-4">🌾</div>
                   <h3 className="text-xl font-semibold mb-2">No lands found</h3>

@@ -11,6 +11,7 @@ import {
   Search, 
   Info, 
   Mail, 
+  LifeBuoy,
   LogIn, 
   LayoutDashboard,
   ChevronDown
@@ -22,6 +23,7 @@ const navItems = [
   { href: "/explore", label: "Explore", icon: Search },
   { href: "/about", label: "About", icon: Info },
   { href: "/contact", label: "Contact", icon: Mail },
+  { href: "/help", label: "Help", icon: LifeBuoy },
 ]
 
 export function Navbar() {
